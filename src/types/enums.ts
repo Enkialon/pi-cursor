@@ -10,6 +10,9 @@ export enum CredentialSource {
   Env = "env",
   CliKeychain = "cli_keychain",
   CliKeychainRefresh = "cli_keychain_refresh",
+  /** Cursor CLI/desktop `auth.json` (Windows/Linux; also present on some macOS installs). */
+  CliAuthFile = "cli_auth_file",
+  CliAuthFileRefresh = "cli_auth_file_refresh",
   IdeVscdb = "ide_vscdb",
   IdeVscdbRefresh = "ide_vscdb_refresh",
   PiOAuth = "pi_oauth",

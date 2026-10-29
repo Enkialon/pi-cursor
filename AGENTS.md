@@ -63,9 +63,9 @@ yarn smoke:wire    # Smoke test low-level wire protocol frames
 src/
 ├── index.ts                # Pi extension entrypoint & provider registration
 ├── usage.ts                # Usage quota dashboard & /cursor.usage handler
-├── auth/                   # 4-tier credential resolution cascade
+├── auth/                   # Credential resolution cascade (env → Pi OAuth → Keychain → auth.json → IDE DB)
 │   ├── index.ts            # Auth exports & manager
-│   ├── cli-credentials.ts  # macOS Keychain, Cursor IDE SQLite DB, WSL path resolution
+│   ├── cli-credentials.ts  # macOS Keychain, CLI auth.json, Cursor IDE SQLite DB, WSL path resolution
 │   ├── oauth.ts            # PKCE browser login flow & token refresh
 │   └── consent.ts          # System credentials privacy consent policy
 ├── client/                 # Low-level RPC & HTTP/2 transport
@@ -108,9 +108,10 @@ src/
 1. `CURSOR_ACCESS_TOKEN` environment variable
 2. Pi OAuth store (`~/.pi/agent/auth.json` via `/login cursor`)
 3. Cursor CLI / macOS Keychain (`cursor-access-token` / `cursor-refresh-token`)
-4. Cursor IDE local state DB (`globalStorage/state.vscdb` on macOS, Linux, Windows, or WSL — current Windows user only)
+4. Cursor CLI/desktop `auth.json` (`%APPDATA%/Cursor/auth.json` on Windows; `~/.config/Cursor/auth.json` on Linux; optional on macOS)
+5. Cursor IDE local state DB (`globalStorage/state.vscdb` on macOS, Linux, Windows, or WSL — current Windows user only)
 
-- Respect `PI_CURSOR_SYSTEM_CREDENTIALS=0` to opt-out of Keychain/IDE DB reading.
+- Respect `PI_CURSOR_SYSTEM_CREDENTIALS=0` to opt-out of Keychain/auth.json/IDE DB reading.
 - Always redact tokens and sensitive authorization headers in diagnostics or logs (`redactSecrets()` from `src/utils/security.ts`).
 
 ### 4. Context-Mode & Side-Channel Injections
@@ -165,7 +166,7 @@ src/
 | :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CURSOR_ACCESS_TOKEN`                          | Static access token override for Cursor API calls                                                                                                                    |
 | `PI_CURSOR_AGENT_URL` / `CURSOR_AGENT_URL`     | Base URL override for Agent Connect RPC (default: `https://agentn.us.api5.cursor.sh`)                                                                                |
-| `PI_CURSOR_SYSTEM_CREDENTIALS`                 | Set to `0` or `false` to disable Keychain / IDE DB credential harvesting                                                                                             |
+| `PI_CURSOR_SYSTEM_CREDENTIALS`                 | Set to `0` or `false` to disable Keychain / auth.json / IDE DB credential harvesting                                                                                 |
 | `PI_CURSOR_CLIENT_VERSION`                     | Pin custom `x-cursor-client-version` header sent by the HTTP/2 transport                                                                                             |
 | `PI_PROXY_CURSOR` / `PI_PROXY` / `HTTPS_PROXY` | HTTP CONNECT proxy for Cursor HTTP/2 (optional)                                                                                                                      |
 | `PI_CURSOR_UNARY_BRIDGE`                       | Set to `1` to force unary RPCs through the general-purpose bridge transport instead of the dedicated one-shot in-process client (diagnostic escape hatch)            |

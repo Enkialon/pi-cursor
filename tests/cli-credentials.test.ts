@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { windowsUsernameFromEnv } from "../src/auth/cli-credentials.js";
+import {
+  cursorCliAuthFilePaths,
+  getCursorCliAuthFileToken,
+  windowsUsernameFromEnv,
+} from "../src/auth/cli-credentials.js";
+import { CredentialSource } from "../src/types/enums.js";
 
 describe("WSL Windows username", () => {
   it("reads the account from USERPROFILE and ignores sibling folders", () => {
@@ -21,5 +29,85 @@ describe("WSL Windows username", () => {
   it("skips Public/Default profiles", () => {
     expect(windowsUsernameFromEnv({ USERPROFILE: "C:\\Users\\Public" })).toBeUndefined();
     expect(windowsUsernameFromEnv({ USERNAME: "Default" })).toBeUndefined();
+  });
+});
+
+describe("Cursor CLI auth.json paths", () => {
+  it("resolves the Windows Roaming Cursor auth.json", () => {
+    expect(
+      cursorCliAuthFilePaths(
+        { APPDATA: "C:\\Users\\ygzh\\AppData\\Roaming" },
+        "C:\\Users\\ygzh",
+        "win32",
+      ),
+    ).toEqual([join("C:\\Users\\ygzh\\AppData\\Roaming", "Cursor/auth.json")]);
+  });
+
+  it("resolves macOS Application Support auth.json", () => {
+    expect(cursorCliAuthFilePaths({}, "/Users/rahul", "darwin")).toEqual([
+      join("/Users/rahul", "Library/Application Support/Cursor/auth.json"),
+    ]);
+  });
+
+  it("resolves Linux and current-user WSL Windows auth.json", () => {
+    expect(
+      cursorCliAuthFilePaths(
+        { WSL_DISTRO_NAME: "Ubuntu", USERPROFILE: "C:\\Users\\rahul" },
+        "/home/rahul",
+        "linux",
+      ),
+    ).toEqual([
+      join("/home/rahul", ".config/Cursor/auth.json"),
+      join("/mnt/c/Users", "rahul", "AppData/Roaming/Cursor/auth.json"),
+    ]);
+  });
+});
+
+describe("Cursor CLI auth.json tokens", () => {
+  let tempRoot: string | undefined;
+
+  afterEach(() => {
+    if (tempRoot) rmSync(tempRoot, { recursive: true, force: true });
+    tempRoot = undefined;
+  });
+
+  it("reads a usable access token from Windows auth.json", async () => {
+    tempRoot = mkdtempSync(join(tmpdir(), "pi-cursor-auth-json-"));
+    const cursorDir = join(tempRoot, "Cursor");
+    mkdirSync(cursorDir, { recursive: true });
+    writeFileSync(
+      join(cursorDir, "auth.json"),
+      JSON.stringify({
+        accessToken: "test-access-token",
+        refreshToken: "test-refresh-token",
+      }),
+      "utf8",
+    );
+
+    const resolved = await getCursorCliAuthFileToken({
+      env: { APPDATA: tempRoot },
+      home: tempRoot,
+      platform: "win32",
+    });
+
+    expect(resolved).toEqual({
+      accessToken: "test-access-token",
+      source: CredentialSource.CliAuthFile,
+    });
+  });
+
+  it("ignores malformed auth.json files", async () => {
+    tempRoot = mkdtempSync(join(tmpdir(), "pi-cursor-auth-json-"));
+    const cursorDir = join(tempRoot, "Cursor");
+    mkdirSync(cursorDir, { recursive: true });
+    writeFileSync(join(cursorDir, "auth.json"), "{not-json", "utf8");
+
+    const resolved = await getCursorCliAuthFileToken({
+      env: { APPDATA: tempRoot },
+      home: tempRoot,
+      platform: "win32",
+    });
+
+    expect(resolved).toBeUndefined();
   });
 });

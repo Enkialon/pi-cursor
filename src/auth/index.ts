@@ -11,7 +11,9 @@ export {
 export {
   resolveSystemCursorAccessToken,
   getCursorKeychainToken,
+  getCursorCliAuthFileToken,
   getCursorVscdbToken,
+  cursorCliAuthFilePaths,
   windowsUsernameFromEnv,
   type CredentialSource,
   type CursorTokenResult,

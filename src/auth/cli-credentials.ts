@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir, platform } from "node:os";
@@ -116,6 +116,88 @@ export async function getCursorKeychainToken(): Promise<CursorTokenResult | unde
     : undefined;
 }
 
+/**
+ * Candidate paths for Cursor CLI / desktop `auth.json`.
+ * On Windows this is the CLI credential store (Keychain is macOS-only).
+ */
+export function cursorCliAuthFilePaths(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  plat: NodeJS.Platform = platform(),
+): string[] {
+  const paths: string[] = [];
+
+  if (plat === "darwin") {
+    paths.push(join(home, "Library/Application Support/Cursor/auth.json"));
+  } else if (plat === "win32") {
+    if (env.APPDATA) paths.push(join(env.APPDATA, "Cursor/auth.json"));
+  } else {
+    paths.push(join(home, ".config/Cursor/auth.json"));
+    const wslHost = Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP || existsSync("/mnt/c/Users"));
+    if (wslHost) {
+      const windowsUser = windowsUsernameFromEnv(env);
+      if (windowsUser) {
+        paths.push(join("/mnt/c/Users", windowsUser, "AppData/Roaming/Cursor/auth.json"));
+      }
+    }
+  }
+
+  return paths;
+}
+
+function parseAuthFileTokens(raw: string): StoredTokens {
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const data = parsed as Record<string, unknown>;
+  const accessToken = typeof data.accessToken === "string" ? data.accessToken.trim() : undefined;
+  const refreshToken = typeof data.refreshToken === "string" ? data.refreshToken.trim() : undefined;
+  return {
+    ...(accessToken ? { accessToken } : {}),
+    ...(refreshToken ? { refreshToken } : {}),
+  };
+}
+
+/** Reads the raw Cursor CLI token pair from `auth.json` (Windows/Linux/macOS file store). */
+function readCliAuthFileTokens(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  plat: NodeJS.Platform = platform(),
+): StoredTokens {
+  const fallback: StoredTokens = {};
+  for (const authPath of cursorCliAuthFilePaths(env, home, plat)) {
+    try {
+      const tokens = parseAuthFileTokens(readFileSync(authPath, "utf8"));
+      if (isUsable(tokens.accessToken)) return tokens;
+      if (!fallback.refreshToken && tokens.refreshToken)
+        fallback.refreshToken = tokens.refreshToken;
+      if (!fallback.accessToken && tokens.accessToken) fallback.accessToken = tokens.accessToken;
+    } catch {
+      // Missing or unreadable auth file
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Reads token from Cursor CLI `auth.json` (used on Windows where Keychain is unavailable).
+ */
+export async function getCursorCliAuthFileToken(options?: {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  platform?: NodeJS.Platform;
+}): Promise<CursorTokenResult | undefined> {
+  const { accessToken, refreshToken } = readCliAuthFileTokens(
+    options?.env ?? process.env,
+    options?.home ?? homedir(),
+    options?.platform ?? platform(),
+  );
+  if (isUsable(accessToken)) return { accessToken, source: CredentialSource.CliAuthFile };
+  const refreshed = await tryRefresh(refreshToken);
+  return refreshed
+    ? { accessToken: refreshed, source: CredentialSource.CliAuthFileRefresh }
+    : undefined;
+}
+
 // Cache the DatabaseSync constructor at module level so repeated vscdb lookups
 // don't pay the dynamic-import cost each time.
 let _databaseSyncCache:
@@ -222,14 +304,15 @@ export async function getCursorVscdbToken(): Promise<CursorTokenResult | undefin
  * Full credential resolution cascade:
  * 1. CURSOR_ACCESS_TOKEN env var
  * 2. macOS Keychain (Cursor CLI) — gated by system-credential consent
- * 3. Cursor IDE state.vscdb — gated by system-credential consent
+ * 3. Cursor CLI/desktop `auth.json` (Windows/Linux; optional on macOS)
+ * 4. Cursor IDE state.vscdb — gated by system-credential consent
  *
- * Both system sources are read concurrently and every *local* token is checked
+ * System sources are read concurrently and every *local* token is checked
  * before any network exchange is attempted. That ordering matters: a stale CLI
  * keychain entry used to trigger a doomed ~2.6s refresh on the startup path
  * even though the IDE database held a valid token two milliseconds away.
  *
- * Opt out of Keychain/vscdb scraping with PI_CURSOR_SYSTEM_CREDENTIALS=0.
+ * Opt out of Keychain/auth.json/vscdb scraping with PI_CURSOR_SYSTEM_CREDENTIALS=0.
  */
 export async function resolveSystemCursorAccessToken(options?: {
   forceRefresh?: boolean;
@@ -246,13 +329,19 @@ export async function resolveSystemCursorAccessToken(options?: {
     return undefined;
   }
 
-  const [keychain, vscdb] = await Promise.all([readKeychainTokens(), readVscdbTokens()]);
+  const [keychain, authFile, vscdb] = await Promise.all([
+    readKeychainTokens(),
+    Promise.resolve(readCliAuthFileTokens()),
+    readVscdbTokens(),
+  ]);
 
   const cached: CursorTokenResult | undefined = isUsable(keychain.accessToken)
     ? { accessToken: keychain.accessToken, source: CredentialSource.CliKeychain }
-    : isUsable(vscdb.accessToken)
-      ? { accessToken: vscdb.accessToken, source: CredentialSource.IdeVscdb }
-      : undefined;
+    : isUsable(authFile.accessToken)
+      ? { accessToken: authFile.accessToken, source: CredentialSource.CliAuthFile }
+      : isUsable(vscdb.accessToken)
+        ? { accessToken: vscdb.accessToken, source: CredentialSource.IdeVscdb }
+        : undefined;
 
   // Fast path: a locally stored token is still valid, so no network at all.
   if (cached && !options?.forceRefresh) return cached;
@@ -262,8 +351,21 @@ export async function resolveSystemCursorAccessToken(options?: {
     return { accessToken: keychainRefreshed, source: CredentialSource.CliKeychainRefresh };
   }
 
-  // Skip a second identical exchange when the CLI mirrored its token into the IDE.
-  if (vscdb.refreshToken && vscdb.refreshToken !== keychain.refreshToken) {
+  // Skip duplicate exchanges when the CLI mirrored the same refresh token into
+  // auth.json and/or the IDE database.
+  const seenRefresh = new Set(
+    [keychain.refreshToken].filter((token): token is string => Boolean(token)),
+  );
+
+  if (authFile.refreshToken && !seenRefresh.has(authFile.refreshToken)) {
+    seenRefresh.add(authFile.refreshToken);
+    const authFileRefreshed = await tryRefresh(authFile.refreshToken);
+    if (authFileRefreshed) {
+      return { accessToken: authFileRefreshed, source: CredentialSource.CliAuthFileRefresh };
+    }
+  }
+
+  if (vscdb.refreshToken && !seenRefresh.has(vscdb.refreshToken)) {
     const vscdbRefreshed = await tryRefresh(vscdb.refreshToken);
     if (vscdbRefreshed)
       return { accessToken: vscdbRefreshed, source: CredentialSource.IdeVscdbRefresh };

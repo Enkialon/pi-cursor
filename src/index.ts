@@ -30,6 +30,7 @@ import {
   registerSessionLifecycleCleanup,
 } from "./extension/debug-hooks.js";
 import { getStartupCursorAccessToken, isTokenNearExpiry } from "./extension/auth.js";
+import { ensureCursorDefaultModelOnSessionStart } from "./extension/default-model.js";
 import { createProviderManager, loadStartupCatalog } from "./extension/provider.js";
 import { registerCursorCommands } from "./extension/commands.js";
 
@@ -163,6 +164,14 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   // the background and updates an open /model selector with the live list.
   const startupCatalog = loadStartupCatalog();
   providerManager.registerModels(startupCatalog.rawModels, startupCatalog.parameterizedModels);
+
+  // Cursor is not in Pi's built-in defaultModelPerProvider map. When auth is
+  // already configured, select Auto (or another preferred model) so /login and
+  // new sessions do not land on an unknown model.
+  pi.on("session_start", async (_event, ctx) => {
+    if (ctx.model) return;
+    await ensureCursorDefaultModelOnSessionStart(pi, providerManager.getLastRegisteredModels());
+  });
 
   registerCursorCommands(pi, {
     getAccessToken,

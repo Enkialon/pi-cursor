@@ -82,24 +82,27 @@ pi update npm:@rahularya01/pi-cursor
 
 ## Authentication and resolution cascade
 
-`pi-cursor` automatically resolves credentials using a 4-tier cascade:
+`pi-cursor` automatically resolves credentials using this cascade:
 
 ```text
 1. CURSOR_ACCESS_TOKEN environment variable
 2. Pi OAuth credentials store (~/.pi/agent/auth.json via /login cursor)
 3. Cursor CLI credentials in macOS Keychain (cursor-access-token / cursor-refresh-token)
-4. Cursor IDE local state DB (globalStorage/state.vscdb on macOS, Windows, Linux, or WSL)
+4. Cursor CLI/desktop auth.json (%APPDATA%/Cursor/auth.json on Windows; ~/.config/Cursor/auth.json on Linux)
+5. Cursor IDE local state DB (globalStorage/state.vscdb on macOS, Windows, Linux, or WSL)
 ```
 
-`/login cursor` is preferred over Keychain/IDE harvest so an explicit Pi login is not silently overridden by another Cursor app account on the machine.
+`/login cursor` is preferred over Keychain/auth.json/IDE harvest so an explicit Pi login is not silently overridden by another Cursor app account on the machine.
 
 ### Automatic CLI & IDE login detection
 
 If you are logged into the Cursor desktop app or Cursor CLI (`cursor` / `agent`), `pi-cursor` automatically extracts your session credentials so you can start chatting immediately without manual browser login.
 
-On **WSL (Windows Subsystem for Linux)**, `pi-cursor` reuses the **current** Windows user's Cursor IDE login (`USERPROFILE` / `USERNAME` → `/mnt/c/Users/<you>/AppData/...`). It does not scan other Windows profiles.
+On **Windows**, Keychain is unavailable, so CLI/desktop login is read from `%APPDATA%\\Cursor\\auth.json`, and the IDE login from `state.vscdb`.
 
-To **opt out** of Keychain / IDE / WSL credential reuse (OAuth or `CURSOR_ACCESS_TOKEN` only):
+On **WSL (Windows Subsystem for Linux)**, `pi-cursor` reuses the **current** Windows user's Cursor CLI/IDE login (`USERPROFILE` / `USERNAME` → `/mnt/c/Users/<you>/AppData/...`). It does not scan other Windows profiles.
+
+To **opt out** of Keychain / auth.json / IDE / WSL credential reuse (OAuth or `CURSOR_ACCESS_TOKEN` only):
 
 ```bash
 export PI_CURSOR_SYSTEM_CREDENTIALS=0
@@ -113,8 +116,9 @@ When no local credentials exist, running `/login cursor` initiates browser sign-
 2. Pi polls `https://api2.cursor.sh/auth/poll` until authentication completes.
 3. Access and refresh tokens are stored in Pi's auth store (`~/.pi/agent/auth.json`).
 4. Tokens are automatically refreshed via `https://api2.cursor.sh/auth/exchange_user_api_key`.
+5. After login, `pi-cursor` selects a default Cursor model (preferring `auto`) because Pi has no built-in default for extension providers.
 
-Use `/cursor.doctor` to inspect which source is active (`tokenSource=cli_keychain`, `tokenSource=ide_vscdb`, `tokenSource=pi_oauth`, `tokenSource=env`).
+Use `/cursor.doctor` to inspect which source is active (`tokenSource=cli_auth_file`, `tokenSource=cli_keychain`, `tokenSource=ide_vscdb`, `tokenSource=pi_oauth`, `tokenSource=env`).
 
 ## Commands
 
@@ -199,7 +203,7 @@ for tuning timeouts, debugging, and edge-case overrides.
 | `CURSOR_ACCESS_TOKEN`                          | Static access token override.                                                                                                                                                                                                                                                                                                                                                                                        |
 | `PI_CURSOR_CLIENT_VERSION`                     | Pin `x-cursor-client-version` header sent by the HTTP/2 bridge.                                                                                                                                                                                                                                                                                                                                                      |
 | `PI_PROXY_CURSOR` / `PI_PROXY` / `HTTPS_PROXY` | HTTP CONNECT proxy for Cursor HTTP/2. `PI_PROXY_CURSOR` wins, then `PI_PROXY`, then `HTTPS_PROXY`.                                                                                                                                                                                                                                                                                                                   |
-| `PI_CURSOR_SYSTEM_CREDENTIALS`                 | `0`/`false` to disable Keychain/IDE credential reuse (default: allow).                                                                                                                                                                                                                                                                                                                                               |
+| `PI_CURSOR_SYSTEM_CREDENTIALS`                 | `0`/`false` to disable Keychain/auth.json/IDE credential reuse (default: allow).                                                                                                                                                                                                                                                                                                                                     |
 | `PI_CURSOR_RAW_MODELS`                         | Disable effort-suffix model collapse.                                                                                                                                                                                                                                                                                                                                                                                |
 | `PI_CURSOR_PROVIDER_DEBUG`                     | Enable verbose JSONL debug logging.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `PI_CURSOR_LIFECYCLE_LOG`                      | Always-on compact lifecycle log path (default: `$TMPDIR/pi-cursor-lifecycle.jsonl`).                                                                                                                                                                                                                                                                                                                                 |

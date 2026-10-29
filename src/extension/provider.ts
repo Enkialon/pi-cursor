@@ -32,6 +32,7 @@ import {
 import { setLastAvailableModels, setLastTokenSource } from "../diagnostics/diagnostics.js";
 import { debugExtensionLog } from "./debug-hooks.js";
 import { getStartupCursorAccessToken } from "./auth.js";
+import { scheduleCursorDefaultModelSelection } from "./default-model.js";
 import { ProviderConstant, CredentialSource } from "../types/enums.js";
 
 export const STARTUP_CATALOG_FRESH_MS = 6 * 60 * 60 * 1000;
@@ -229,7 +230,13 @@ export function createProviderManager(
               catalog.rawModels.length > 0 ? catalog.rawModels : FALLBACK_MODELS,
               catalog.parameterizedModels,
             );
+          } else if (lastRegisteredModels.length === 0) {
+            register(FALLBACK_MODELS, []);
           }
+
+          // Pi has no built-in default for extension provider "cursor", so pick one
+          // after credentials are persisted (avoids the post-login /model error).
+          scheduleCursorDefaultModelSelection(pi, lastRegisteredModels, "oauth_login");
 
           return {
             refresh: refreshToken,
