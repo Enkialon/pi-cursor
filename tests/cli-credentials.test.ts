@@ -57,8 +57,14 @@ describe("Cursor CLI auth.json paths", () => {
         "linux",
       ),
     ).toEqual([
-      join("/home/rahul", ".config/Cursor/auth.json"),
+      join("/home/rahul", ".config/cursor/auth.json"),
       join("/mnt/c/Users", "rahul", "AppData/Roaming/Cursor/auth.json"),
+    ]);
+  });
+
+  it("resolves native Linux auth.json without a capital-C or WSL fallback", () => {
+    expect(cursorCliAuthFilePaths({}, "/home/rahul", "linux")).toEqual([
+      join("/home/rahul", ".config/cursor/auth.json"),
     ]);
   });
 });
@@ -92,6 +98,7 @@ describe("Cursor CLI auth.json tokens", () => {
 
     expect(resolved).toEqual({
       accessToken: "test-access-token",
+      refreshToken: "test-refresh-token",
       source: CredentialSource.CliAuthFile,
     });
   });

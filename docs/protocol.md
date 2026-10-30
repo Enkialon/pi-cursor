@@ -36,10 +36,10 @@ https://agentn.us.api5.cursor.sh / https://api2.cursor.sh
 
 ```text
 1. CURSOR_ACCESS_TOKEN env var
-2. Pi OAuth credentials store (~/.pi/agent/auth.json via PKCE deep-link flow)
-3. macOS Keychain (cursor-access-token / cursor-refresh-token via security CLI)
-4. Cursor CLI/desktop auth.json (%APPDATA%/Cursor/auth.json on Windows; ~/.config/Cursor/auth.json on Linux)
-5. Cursor IDE local SQLite DB (globalStorage/state.vscdb; WSL uses the current Windows user only)
+2. Cursor CLI/desktop auth.json (%APPDATA%/Cursor/auth.json on Windows; ~/.config/cursor/auth.json on Linux)
+3. Pi OAuth credentials store (~/.pi/agent/auth.json via PKCE deep-link flow)
+4. macOS Keychain (cursor-access-token / cursor-refresh-token via security CLI)
+5. Cursor IDE local SQLite DB (globalStorage/state.vscdb on macOS/Windows; WSL uses the current Windows user only — native Linux has no IDE DB)
 ```
 
 If an access token is expired or close to expiry, `refreshCursorToken()` sends a refresh request to `POST https://api2.cursor.sh/auth/exchange_user_api_key`.

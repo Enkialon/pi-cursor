@@ -106,10 +106,10 @@ src/
 ### 3. Authentication Cascade Policy
 
 1. `CURSOR_ACCESS_TOKEN` environment variable
-2. Pi OAuth store (`~/.pi/agent/auth.json` via `/login cursor`)
-3. Cursor CLI / macOS Keychain (`cursor-access-token` / `cursor-refresh-token`)
-4. Cursor CLI/desktop `auth.json` (`%APPDATA%/Cursor/auth.json` on Windows; `~/.config/Cursor/auth.json` on Linux; optional on macOS)
-5. Cursor IDE local state DB (`globalStorage/state.vscdb` on macOS, Linux, Windows, or WSL — current Windows user only)
+2. Cursor CLI/desktop `auth.json` (`%APPDATA%/Cursor/auth.json` on Windows; `~/.config/cursor/auth.json` on Linux; optional on macOS)
+3. Pi OAuth store (`~/.pi/agent/auth.json` via `/login cursor`)
+4. Cursor CLI / macOS Keychain (`cursor-access-token` / `cursor-refresh-token`)
+5. Cursor IDE local state DB (`globalStorage/state.vscdb` on macOS/Windows; WSL reuses the current Windows user only — native Linux has no IDE DB)
 
 - Respect `PI_CURSOR_SYSTEM_CREDENTIALS=0` to opt-out of Keychain/auth.json/IDE DB reading.
 - Always redact tokens and sensitive authorization headers in diagnostics or logs (`redactSecrets()` from `src/utils/security.ts`).

@@ -115,9 +115,13 @@ export default async function (pi: ExtensionAPI): Promise<void> {
       (currentTokenSource !== CredentialSource.Env && isTokenNearExpiry(currentToken));
 
     if (needsRefresh) {
-      const resolved = await getStartupCursorAccessToken({
-        forceRefresh: options?.forceRefresh || isTokenNearExpiry(currentToken || "x"),
-      });
+      // Only force a network refresh when the caller asked for it, or when we
+      // already hold a near-expiry token. An empty token must not force-refresh
+      // (CLI session JWTs are often non-exchangeable and would 401).
+      const forceRefresh =
+        options?.forceRefresh === true ||
+        (Boolean(currentToken) && isTokenNearExpiry(currentToken));
+      const resolved = await getStartupCursorAccessToken({ forceRefresh });
       if (resolved) {
         currentToken = resolved.accessToken;
         currentTokenSource = resolved.source;
@@ -158,6 +162,24 @@ export default async function (pi: ExtensionAPI): Promise<void> {
       lastRegisteredModels = models;
     },
   });
+
+  // Resolve local Cursor login up front so Pi's auth.json is seeded before the
+  // UI decides the provider is "not configured" and prompts for /login.
+  try {
+    const startupAuth = await getStartupCursorAccessToken();
+    if (startupAuth) {
+      currentToken = startupAuth.accessToken;
+      currentTokenSource = startupAuth.source;
+      setLastTokenSource(startupAuth.source);
+      debugExtensionLog("extension.startup_auth", { source: startupAuth.source });
+    } else {
+      debugExtensionLog("extension.startup_auth", { source: CredentialSource.None });
+    }
+  } catch (err) {
+    debugExtensionLog("extension.startup_auth_failed", {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // Activation must not block on the network. Register the last-known-good
   // catalog (or the bundled fallback) synchronously; pi calls refreshModels in

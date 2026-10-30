@@ -15,6 +15,8 @@ export { CredentialSource };
 export interface CursorTokenResult {
   accessToken: string;
   source: CredentialSource;
+  /** Present when harvested from a store that also has a refresh token. */
+  refreshToken?: string;
 }
 
 /** Raw token pair as stored by the Cursor CLI or IDE, before any validation. */
@@ -56,13 +58,49 @@ function isUsable(token: string | undefined): token is string {
 }
 
 /**
+ * Cursor CLI/desktop sometimes stores the same session JWT as both access and
+ * refresh. `exchange_user_api_key` rejects those with "Invalid User API Key",
+ * so treat them as non-refreshable and keep using the still-valid access token.
+ */
+function isExchangeableRefreshToken(
+  refreshToken: string | undefined,
+  accessToken?: string,
+): refreshToken is string {
+  if (!refreshToken) return false;
+  if (accessToken && refreshToken === accessToken) return false;
+  try {
+    const parts = refreshToken.split(".");
+    if (parts.length === 3 && parts[1]) {
+      const payload: unknown = JSON.parse(
+        Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString(),
+      );
+      if (
+        payload &&
+        typeof payload === "object" &&
+        !Array.isArray(payload) &&
+        (payload as { type?: unknown }).type === "session"
+      ) {
+        return false;
+      }
+    }
+  } catch {
+    // Non-JWT refresh tokens are still eligible for exchange.
+  }
+  return true;
+}
+
+/**
  * Exchange a refresh token, honouring the failure back-off.
  *
  * Returns undefined without touching the network when this exact token failed
  * recently — a stale Cursor CLI entry otherwise costs seconds on every launch.
  */
-async function tryRefresh(refreshToken: string | undefined): Promise<string | undefined> {
-  if (!refreshToken || isRefreshKnownBad(refreshToken)) return undefined;
+async function tryRefresh(
+  refreshToken: string | undefined,
+  accessToken?: string,
+): Promise<string | undefined> {
+  if (!isExchangeableRefreshToken(refreshToken, accessToken)) return undefined;
+  if (isRefreshKnownBad(refreshToken)) return undefined;
   try {
     const refreshed = await refreshCursorToken(refreshToken);
     markRefreshSucceeded(refreshToken);
@@ -110,9 +148,9 @@ async function readKeychainTokens(): Promise<StoredTokens> {
 export async function getCursorKeychainToken(): Promise<CursorTokenResult | undefined> {
   const { accessToken, refreshToken } = await readKeychainTokens();
   if (isUsable(accessToken)) return { accessToken, source: CredentialSource.CliKeychain };
-  const refreshed = await tryRefresh(refreshToken);
+  const refreshed = await tryRefresh(refreshToken, accessToken);
   return refreshed
-    ? { accessToken: refreshed, source: CredentialSource.CliKeychainRefresh }
+    ? { accessToken: refreshed, source: CredentialSource.CliKeychainRefresh, refreshToken }
     : undefined;
 }
 
@@ -132,7 +170,9 @@ export function cursorCliAuthFilePaths(
   } else if (plat === "win32") {
     if (env.APPDATA) paths.push(join(env.APPDATA, "Cursor/auth.json"));
   } else {
-    paths.push(join(home, ".config/Cursor/auth.json"));
+    // Linux uses lowercase `~/.config/cursor` (no capital-C fallback).
+    // Prefer the local Linux store before any WSL-mounted Windows auth.json.
+    paths.push(join(home, ".config/cursor/auth.json"));
     const wslHost = Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP || existsSync("/mnt/c/Users"));
     if (wslHost) {
       const windowsUser = windowsUsernameFromEnv(env);
@@ -185,16 +225,27 @@ export async function getCursorCliAuthFileToken(options?: {
   env?: NodeJS.ProcessEnv;
   home?: string;
   platform?: NodeJS.Platform;
+  forceRefresh?: boolean;
 }): Promise<CursorTokenResult | undefined> {
   const { accessToken, refreshToken } = readCliAuthFileTokens(
     options?.env ?? process.env,
     options?.home ?? homedir(),
     options?.platform ?? platform(),
   );
-  if (isUsable(accessToken)) return { accessToken, source: CredentialSource.CliAuthFile };
-  const refreshed = await tryRefresh(refreshToken);
-  return refreshed
-    ? { accessToken: refreshed, source: CredentialSource.CliAuthFileRefresh }
+  if (!options?.forceRefresh && isUsable(accessToken)) {
+    return { accessToken, source: CredentialSource.CliAuthFile, refreshToken };
+  }
+  const refreshed = await tryRefresh(refreshToken, accessToken);
+  if (refreshed) {
+    return {
+      accessToken: refreshed,
+      source: CredentialSource.CliAuthFileRefresh,
+      refreshToken,
+    };
+  }
+  // forceRefresh could not rotate — keep a still-valid access token rather than failing open.
+  return isUsable(accessToken)
+    ? { accessToken, source: CredentialSource.CliAuthFile, refreshToken }
     : undefined;
 }
 
@@ -235,8 +286,8 @@ async function readVscdbTokens(): Promise<StoredTokens> {
       dbPaths.push(join(process.env.APPDATA, "Cursor/User/globalStorage/state.vscdb"));
     }
   } else {
-    // Linux / WSL
-    dbPaths.push(join(home, ".config/Cursor/User/globalStorage/state.vscdb"));
+    // Native Linux has no Cursor IDE state.vscdb; only WSL can reuse the
+    // current Windows user's AppData database via /mnt/c.
     const wslHost = Boolean(
       process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP || existsSync("/mnt/c/Users"),
     );
@@ -293,19 +344,19 @@ async function readVscdbTokens(): Promise<StoredTokens> {
  */
 export async function getCursorVscdbToken(): Promise<CursorTokenResult | undefined> {
   const { accessToken, refreshToken } = await readVscdbTokens();
-  if (isUsable(accessToken)) return { accessToken, source: CredentialSource.IdeVscdb };
-  const refreshed = await tryRefresh(refreshToken);
+  if (isUsable(accessToken)) return { accessToken, source: CredentialSource.IdeVscdb, refreshToken };
+  const refreshed = await tryRefresh(refreshToken, accessToken);
   return refreshed
-    ? { accessToken: refreshed, source: CredentialSource.IdeVscdbRefresh }
+    ? { accessToken: refreshed, source: CredentialSource.IdeVscdbRefresh, refreshToken }
     : undefined;
 }
 
 /**
- * Full credential resolution cascade:
+ * System credential resolution cascade (after env / when called directly):
  * 1. CURSOR_ACCESS_TOKEN env var
- * 2. macOS Keychain (Cursor CLI) — gated by system-credential consent
- * 3. Cursor CLI/desktop `auth.json` (Windows/Linux; optional on macOS)
- * 4. Cursor IDE state.vscdb — gated by system-credential consent
+ * 2. Cursor CLI/desktop `auth.json` (Windows/Linux; optional on macOS)
+ * 3. macOS Keychain (Cursor CLI)
+ * 4. Cursor IDE state.vscdb
  *
  * System sources are read concurrently and every *local* token is checked
  * before any network exchange is attempted. That ordering matters: a stale CLI
@@ -316,6 +367,8 @@ export async function getCursorVscdbToken(): Promise<CursorTokenResult | undefin
  */
 export async function resolveSystemCursorAccessToken(options?: {
   forceRefresh?: boolean;
+  /** When true, skip auth.json (already tried at higher priority by the caller). */
+  skipAuthFile?: boolean;
 }): Promise<CursorTokenResult | undefined> {
   const envToken = getCursorAccessTokenFromEnv();
   if (envToken) {
@@ -331,14 +384,17 @@ export async function resolveSystemCursorAccessToken(options?: {
 
   const [keychain, authFile, vscdb] = await Promise.all([
     readKeychainTokens(),
-    Promise.resolve(readCliAuthFileTokens()),
+    options?.skipAuthFile
+      ? Promise.resolve({} as StoredTokens)
+      : Promise.resolve(readCliAuthFileTokens()),
     readVscdbTokens(),
   ]);
 
-  const cached: CursorTokenResult | undefined = isUsable(keychain.accessToken)
-    ? { accessToken: keychain.accessToken, source: CredentialSource.CliKeychain }
-    : isUsable(authFile.accessToken)
-      ? { accessToken: authFile.accessToken, source: CredentialSource.CliAuthFile }
+  // Prefer local Cursor auth.json over Keychain / IDE DB.
+  const cached: CursorTokenResult | undefined = isUsable(authFile.accessToken)
+    ? { accessToken: authFile.accessToken, source: CredentialSource.CliAuthFile }
+    : isUsable(keychain.accessToken)
+      ? { accessToken: keychain.accessToken, source: CredentialSource.CliKeychain }
       : isUsable(vscdb.accessToken)
         ? { accessToken: vscdb.accessToken, source: CredentialSource.IdeVscdb }
         : undefined;
@@ -346,29 +402,43 @@ export async function resolveSystemCursorAccessToken(options?: {
   // Fast path: a locally stored token is still valid, so no network at all.
   if (cached && !options?.forceRefresh) return cached;
 
-  const keychainRefreshed = await tryRefresh(keychain.refreshToken);
-  if (keychainRefreshed) {
-    return { accessToken: keychainRefreshed, source: CredentialSource.CliKeychainRefresh };
-  }
-
   // Skip duplicate exchanges when the CLI mirrored the same refresh token into
   // auth.json and/or the IDE database.
-  const seenRefresh = new Set(
-    [keychain.refreshToken].filter((token): token is string => Boolean(token)),
-  );
+  const seenRefresh = new Set<string>();
 
-  if (authFile.refreshToken && !seenRefresh.has(authFile.refreshToken)) {
+  if (authFile.refreshToken) {
     seenRefresh.add(authFile.refreshToken);
-    const authFileRefreshed = await tryRefresh(authFile.refreshToken);
+    const authFileRefreshed = await tryRefresh(authFile.refreshToken, authFile.accessToken);
     if (authFileRefreshed) {
-      return { accessToken: authFileRefreshed, source: CredentialSource.CliAuthFileRefresh };
+      return {
+        accessToken: authFileRefreshed,
+        source: CredentialSource.CliAuthFileRefresh,
+        refreshToken: authFile.refreshToken,
+      };
+    }
+  }
+
+  if (keychain.refreshToken && !seenRefresh.has(keychain.refreshToken)) {
+    seenRefresh.add(keychain.refreshToken);
+    const keychainRefreshed = await tryRefresh(keychain.refreshToken, keychain.accessToken);
+    if (keychainRefreshed) {
+      return {
+        accessToken: keychainRefreshed,
+        source: CredentialSource.CliKeychainRefresh,
+        refreshToken: keychain.refreshToken,
+      };
     }
   }
 
   if (vscdb.refreshToken && !seenRefresh.has(vscdb.refreshToken)) {
-    const vscdbRefreshed = await tryRefresh(vscdb.refreshToken);
-    if (vscdbRefreshed)
-      return { accessToken: vscdbRefreshed, source: CredentialSource.IdeVscdbRefresh };
+    const vscdbRefreshed = await tryRefresh(vscdb.refreshToken, vscdb.accessToken);
+    if (vscdbRefreshed) {
+      return {
+        accessToken: vscdbRefreshed,
+        source: CredentialSource.IdeVscdbRefresh,
+        refreshToken: vscdb.refreshToken,
+      };
+    }
   }
 
   // forceRefresh could not improve on what we already had — keep it rather than

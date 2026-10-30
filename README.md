@@ -86,13 +86,13 @@ pi update npm:@rahularya01/pi-cursor
 
 ```text
 1. CURSOR_ACCESS_TOKEN environment variable
-2. Pi OAuth credentials store (~/.pi/agent/auth.json via /login cursor)
-3. Cursor CLI credentials in macOS Keychain (cursor-access-token / cursor-refresh-token)
-4. Cursor CLI/desktop auth.json (%APPDATA%/Cursor/auth.json on Windows; ~/.config/Cursor/auth.json on Linux)
-5. Cursor IDE local state DB (globalStorage/state.vscdb on macOS, Windows, Linux, or WSL)
+2. Cursor CLI/desktop auth.json (%APPDATA%/Cursor/auth.json on Windows; ~/.config/cursor/auth.json on Linux)
+3. Pi OAuth credentials store (~/.pi/agent/auth.json via /login cursor)
+4. Cursor CLI credentials in macOS Keychain (cursor-access-token / cursor-refresh-token)
+5. Cursor IDE local state DB (globalStorage/state.vscdb on macOS/Windows; WSL reuses the current Windows user — native Linux has no IDE DB)
 ```
 
-`/login cursor` is preferred over Keychain/auth.json/IDE harvest so an explicit Pi login is not silently overridden by another Cursor app account on the machine.
+Local Cursor CLI/desktop `auth.json` is preferred over Pi OAuth / Keychain / IDE harvest when present.
 
 ### Automatic CLI & IDE login detection
 

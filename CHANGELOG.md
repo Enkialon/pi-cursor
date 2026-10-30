@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+## [1.4.42] - 2026-10-30
+
 ### Fixed
 
-- **Windows Cursor CLI/desktop login is shared with Pi.** Keychain is macOS-only, so credential harvest now also reads `%APPDATA%/Cursor/auth.json` (and the Linux/WSL equivalents) before falling back to the IDE `state.vscdb`. `/cursor.doctor` reports `tokenSource=cli_auth_file` when that store wins.
+- **Local Cursor CLI/desktop login is preferred and synced into Pi.** `auth.json` (`%APPDATA%/Cursor/auth.json` on Windows; `~/.config/cursor/auth.json` on Linux) now ranks above Pi OAuth / Keychain / IDE DB. On startup, a harvested system login is written into `~/.pi/agent/auth.json` so Pi no longer keeps prompting `/login cursor` when Cursor is already signed in.
+- **Linux credential paths match the real XDG layout.** Harvest reads lowercase `~/.config/cursor/auth.json` only (no capital-`Cursor` fallback). Native Linux has no IDE `state.vscdb`; WSL still reuses the current Windows user's AppData database.
+- **Session JWTs are no longer force-refreshed as API keys.** When Cursor stores the same `session` token as both access and refresh, `exchange_user_api_key` returns `Invalid User API Key`. Those tokens are treated as non-exchangeable and the still-valid access token is kept.
+- **Windows Cursor CLI/desktop login is shared with Pi.** Keychain is macOS-only, so credential harvest also reads `%APPDATA%/Cursor/auth.json` (and the Linux/WSL equivalents) before falling back to the IDE `state.vscdb`. `/cursor.doctor` reports `tokenSource=cli_auth_file` when that store wins.
 - **`/login cursor` no longer leaves the session without a model.** Pi has no built-in default for extension provider `cursor`, which produced `no default model is configured for provider "cursor"` right after login. After OAuth succeeds (and on session start when no model is selected), `pi-cursor` selects a preferred model (`auto`, then `composer-2`…) and writes `defaultProvider`/`defaultModel` into settings when unset.
 
 ## [1.4.39] - 2026-10-08
