@@ -164,7 +164,7 @@ describe("native Cursor exec steering", () => {
 
   it("falls back to a generic MCP-only hint when no matching tool exists", () => {
     expect(serverMessageInternals.nativeToolRejectReason("shellArgs", [])).toMatch(
-      /No Pi MCP tools are exposed for this request/,
+      /No Pi MCP tools are exposed for this turn/,
     );
   });
 

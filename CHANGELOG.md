@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cursor-trained Write/StrReplace argument names no longer fail Pi MCP validation.** Models often send Write as `contents` and StrReplace as `old_string`/`new_string`, while Pi's tools require `content` and `oldText`/`newText`. Advertised MCP schemas now accept those aliases (`anyOf`), and live `mcpArgs` are rewritten to Pi's canonical names before dispatch.
+- **Native-tool rejection copy no longer sounds like an MCP outage.** Rejected Cursor local tools now say they are *disabled in Pi* and point at the registered `mcp_pi_*` tools, instead of "It is unavailable" / "Local operations are unavailable".
+
 ## [1.4.42] - 2026-10-30
 
 ### Fixed

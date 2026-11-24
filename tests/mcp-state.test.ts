@@ -302,12 +302,18 @@ describe("Cursor MCP discovery compatibility", () => {
       expect(edit.schemaJson).toEqual(edit.schema);
       expect(edit.schema).toMatchObject({
         type: "object",
-        required: ["path", "oldText", "newText"],
+        required: ["path"],
         properties: {
           oldText: { type: "string", description: "Exact original text, including whitespace." },
           newText: { type: "string", description: "Replacement text." },
+          old_string: { type: "string" },
+          new_string: { type: "string" },
         },
       });
+      expect((edit.schema as { anyOf?: unknown }).anyOf).toEqual([
+        { required: ["oldText", "newText"] },
+        { required: ["old_string", "new_string"] },
+      ]);
     },
   );
 

@@ -145,9 +145,11 @@ describe("Pi-only local tool routing", () => {
 
   it("scopes missing tools to the current request, including tool-free greetings", () => {
     const policy = localToolPolicyText([]);
-    expect(policy).toContain("No Pi MCP tools are exposed for this request");
+    expect(policy).toContain("No Pi MCP tools are exposed for this turn");
     expect(policy).toContain("do not call or retry them");
+    expect(policy).toContain("cannot run right now");
     expect(policy).not.toContain("No Pi MCP tools are registered");
+    expect(policy).not.toContain("unavailable");
   });
 
   it("keeps the prompt compact without hiding custom tools behind a no-tools claim", () => {

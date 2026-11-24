@@ -90,9 +90,10 @@ export function nativeToolRejectReason(execCase: string, tools: McpToolDefinitio
   const guidance = names.length
     ? `Use the registered Pi MCP tools: ${names.join(", ")}. ` +
       "Choose a tool that supports the operation and construct arguments according to its schema; " +
-      "do not copy native Cursor arguments unchanged. If none supports it, report that limitation."
-    : "No Pi MCP tools are exposed for this request, so this operation cannot be performed in this request.";
-  return `Do not retry this native Cursor tool. It is unavailable. No operation was performed. ${guidance}`;
+      "do not copy native Cursor arguments unchanged (for example Write uses `contents` but mcp_pi_write expects `content` or accepts it as an alias). " +
+      "If none supports it, report that limitation."
+    : "No Pi MCP tools are exposed for this turn, so this local operation cannot be performed right now.";
+  return `Do not retry this native Cursor tool — it is disabled in Pi. No operation was performed. ${guidance}`;
 }
 
 /** Builds prompt guidance for Pi-owned local operations, including tool-free requests. */
@@ -113,6 +114,6 @@ export function localToolPolicyText(tools: McpToolDefinition[]): string {
         (clashes.length ? `To avoid a name clash, ${clashes.join("; ")}. ` : "") +
         "Other exposed Pi tools may also support the operation. Follow each tool's input schema. " +
         "If no registered tool supports an operation, report that limitation."
-      : "No Pi MCP tools are exposed for this request. Local operations are unavailable in this request.")
+      : "No Pi MCP tools are exposed for this turn, so local file/shell operations cannot run right now.")
   );
 }

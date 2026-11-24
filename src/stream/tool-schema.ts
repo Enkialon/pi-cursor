@@ -9,6 +9,7 @@ import { create, fromJson, type JsonValue } from "@bufbuild/protobuf";
 import { ValueSchema } from "@bufbuild/protobuf/wkt";
 
 import { McpToolDefinitionSchema, type McpToolDefinition } from "../proto/agent_pb.js";
+import { expandToolSchemaForCursorAliases } from "./mcp-arg-compat.js";
 import type { OpenAIToolDef } from "./types.js";
 
 /**
@@ -170,9 +171,12 @@ export function buildMcpToolDefinitions(tools: OpenAIToolDef[]): McpToolDefiniti
     const name = typeof fn.name === "string" ? fn.name.trim() : "";
     if (!name) continue;
     const description = typeof fn.description === "string" ? fn.description : "";
-    const jsonSchema: JsonValue = isObjectRecord(fn.parameters)
-      ? (fn.parameters as JsonValue)
-      : { type: "object", properties: {}, required: [] };
+    const jsonSchema: JsonValue = expandToolSchemaForCursorAliases(
+      name,
+      isObjectRecord(fn.parameters)
+        ? fn.parameters
+        : { type: "object", properties: {}, required: [] },
+    ) as JsonValue;
     // Current Cursor prefers field 6 and falls back to the Value in field 3.
     // Populate both from the same schema so either discovery path agrees.
     const inputSchema = fromJson(ValueSchema, jsonSchema);
